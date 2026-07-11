@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(SDLRenderer
     source/sdl_softrender.cpp
+    source/Model.cpp
 )
 
 # -------------------------
