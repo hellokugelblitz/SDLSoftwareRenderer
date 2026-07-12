@@ -5,10 +5,32 @@
 #include <string>
 #include <map>
 #include <sstream>
+#include <cmath>
 
 // Vector 3 Representation
 struct Vector3 {
     float x,y,z;
+
+    // Vector Subtraction
+    Vector3 operator-(const Vector3& v) const {
+        return Vector3(x - v.x, y - v.y, z - v.z);
+    }
+
+    Vector3 operator+(const Vector3& v) const {
+        return Vector3(x + v.x, y + v.y, z + v.z);
+    }
+
+    void normalize() {
+        float mag = sqrt(x * x + y * y + z * z);
+        x = x / mag;
+        y = y / mag;
+        z = z / mag;
+    }
+
+    Vector3 normalized() const {
+        float mag = sqrt(x * x + y * y + z * z);
+        return Vector3(x / mag, y / mag, z / mag);
+    }
 };
 
 struct Vector2 {

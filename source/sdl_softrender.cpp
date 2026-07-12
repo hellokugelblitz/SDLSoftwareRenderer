@@ -48,6 +48,7 @@ namespace {
 constexpr char kWindowTitle[] = "Title";
 constexpr int  kBytesPerPixel = 4;
 constexpr int  kScrollSpeed   = 3;
+constexpr bool kWireframeMode = false;
 constexpr float kNear         = -1.0f;
 constexpr float kFar          = 1.0f;
 constexpr bool showFPS        = true;
@@ -334,23 +335,6 @@ namespace Math {
     int p = secondMat.cols;
     Matrix newMat(n,p);
 
-  // Given two matrices, A of n rows and k columns ((n,k) from now on) and a (k,m) 
-  // matrix B of, the product of AB is an (n,m) matrix C. The element C[r][c] is 
-  // defined as a the dot product of row r of A with the column c of B. 
-
-    // for i in tqdm(range(n)):    
-    //    for j in range(n):        
-    //       for k in range(n):            
-    //          C[i][j] += A[i][k] * B[k][j]
-
-    // for(int i = 0; i < n; ++i) {        
-    //    for(int k = 0; k < n; ++k) {      
-    //       for(int j = 0; j < n; ++j)     {                
-    //          C[i][j] += A[i][k] * B[k][j];            
-    //       } 
-    //    }    
-    // }
-
     for(int i = 0; i<n; i++){
       for(int j = 0; j<p; j++){
         for(int k = 0; k<m; k++) {
@@ -386,6 +370,15 @@ namespace Math {
 
   float dotProd(Vector3 vec_one, Vector3 vec_two){
     return (vec_one.x * vec_two.x) + (vec_one.y * vec_two.y) + (vec_one.z * vec_two.z);
+  }
+
+  // Cross product member function
+  Vector3 cross(const Vector3& one, const Vector3& two) {
+      return Vector3{
+          one.y * two.z - one.z * two.y,
+          one.z * two.x - one.x * two.z,
+          one.x * two.y - one.y * two.x
+      };
   }
 
   // ----------------- Math standard Matricies for affine transformations --------------------
@@ -440,7 +433,7 @@ namespace Math {
       return Math::Matrix(4, 4, {
           d,  0,  0,  0,
           0,  d,  0,  0,
-          0,  0,  (cameraFarClip + cameraNearClip / (cameraNearClip - cameraFarClip)),  (2 * cameraFarClip * cameraNearClip / (cameraNearClip - cameraFarClip)),
+          0,  0,  (cameraFarClip + cameraNearClip) / (cameraNearClip - cameraFarClip),  (2 * cameraFarClip * cameraNearClip / (cameraNearClip - cameraFarClip)),
           0,  0,  -1,  0,
       });
   }
@@ -453,9 +446,13 @@ namespace World {
 
 // we need to know the cameras position in worldspace
 Vector3 cameraPos        = {0,0,0};
-Vector3 cameraRot        = {0,0,0};
+Vector3 cameraTarget     = {0,0,1};
+Vector3 cameraDir        = {0,0,1};
+Vector3 cameraForward   = Math::forward();  // where the camera actually looks
+Vector3 cameraRight      = Math::cross(Math::up(), cameraForward).normalized();
+Vector3 cameraUp         = Math::cross(cameraForward, cameraRight);
 float focalLength        = 1.0f; // distance to the viewing plane.
-double cameraNearClip    = 3.0f;
+double cameraNearClip    = 0.5f;
 double cameraFarClip     = 10.0f;
 double rotationAngleX    = 0 * (M_PI / 180.0);
 double rotationAngleY    = 0 * (M_PI / 180.0);
@@ -468,18 +465,23 @@ Math::Matrix scale       = Math::makeScale(1.5,1,1);
 Math::Matrix model       = Math::matMult(Math::matMult(translation, rotation), scale);
 Math::Matrix projection  = Math::makeProjection((float)cameraNearClip, (float)cameraFarClip, focalLength);
 
+void updateCameraBasis() {
+    cameraTarget = cameraPos + cameraForward;
+    cameraDir = { -cameraForward.x, -cameraForward.y, -cameraForward.z };
+    cameraRight  = Math::cross(Math::up(), cameraForward).normalized();
+    cameraUp     = Math::cross(cameraForward, cameraRight);
+}
 
 // This used to return std::tuple<int,int>
 
 // Project a vec3 in Model/world space into an orthogonal representation in screen space.
 Math::Matrix project(Vector3 v, float minX, float maxX, float minY, float maxY) {
-
       // Then we move the model from world space into view or camera space...
-      Math::Matrix view(4,4, {
-        Math::right().x, Math::right().y, Math::right().z, -Math::dotProd(Math::right(),cameraPos),
-        Math::up().x, Math::up().y, Math::up().z, -Math::dotProd(Math::up(),cameraPos),
-        Math::forward().x, Math::forward().y, Math::forward().z, -Math::dotProd(Math::forward(),cameraPos),
-        0, 0, 0, 1
+      Math::Matrix view(4, 4, {
+          cameraRight.x, cameraRight.y, cameraRight.z, -Math::dotProd(cameraRight, cameraPos),
+          cameraUp.x,    cameraUp.y,    cameraUp.z,    -Math::dotProd(cameraUp, cameraPos),
+          cameraDir.x,   cameraDir.y,   cameraDir.z,   -Math::dotProd(cameraDir, cameraPos),
+          0,             0,             0,             1
       });
 
       Math::Matrix vecMat(4,1, {
@@ -488,9 +490,6 @@ Math::Matrix project(Vector3 v, float minX, float maxX, float minY, float maxY) 
           v.z,
           1
       });
-  
-
-      // Math::Matrix viewPos = Math::matMult(Math::matMult(projection, Math::matMult(view, model)), vecMat);    
 
       // so we basically need to do this instead, return the view space representation.
       return Math::matMult(Math::matMult(projection, Math::matMult(view, model)), vecMat);    
@@ -503,7 +502,7 @@ std::tuple<int,int> projectViewMat(const Math::Matrix viewPos){
     float viewPosZ = viewPos.at(2,0);
     float viewPosW = viewPos.at(3,0);
 
-    float px = 0; 
+    float px = 0;
     float py = 0;
     px = viewPosX / viewPosW; // this is called the "perspective divide"
     py = viewPosY / viewPosW;
@@ -513,8 +512,8 @@ std::tuple<int,int> projectViewMat(const Math::Matrix viewPos){
     int x_offset = (g_win_width  - size) / 2; // center the model in the screen
     int y_offset = (g_win_height - size) / 2;
 
-    return { (int)-(px * size) + x_offset,
-             (int)-(-py * size) + y_offset };
+    return { (int)(px * size) + x_offset,
+             (int)(-py * size) + y_offset };
 }
 
 Vector3 crossProduct(Vector3 vect_A, Vector3 vect_B)
@@ -535,10 +534,6 @@ void createTriangle(int current_index, const unsigned int* indices, const float*
     float x0 = verts[v1*3+0], y0 = verts[v1*3+1], z0 = verts[v1*3+2];
     float x1 = verts[v2*3+0], y1 = verts[v2*3+1], z1 = verts[v2*3+2];
     float x2 = verts[v3*3+0], y2 = verts[v3*3+1], z2 = verts[v3*3+2];
-  
-    //auto [ax, ay] = World::project(Vector3{x0,y0,z0}, minX, maxX, minY, maxY);
-    //auto [bx, by] = World::project(Vector3{x1,y1,z1}, minX, maxX, minY, maxY);
-    //auto [cx, cy] = World::project(Vector3{x2,y2,z2}, minX, maxX, minY, maxY);
 
     Math::Matrix pointOneView = World::project(Vector3{x0,y0,z0}, minX, maxX, minY, maxY);
     Math::Matrix pointTwoView = World::project(Vector3{x1,y1,z1}, minX, maxX, minY, maxY);
@@ -546,8 +541,11 @@ void createTriangle(int current_index, const unsigned int* indices, const float*
     float onePosZ = pointOneView.at(2,0);
     float twoPosZ = pointTwoView.at(2,0);
     float threePosZ = pointThreeView.at(2,0);
-
+  
+    // Clipping
     if(onePosZ < World::cameraNearClip || twoPosZ < World::cameraNearClip || threePosZ < World::cameraNearClip) {
+      // todo(jack): Here we could do tests to see how many points are outside the cliping plane and tesselate based on that.
+      // todo(jack): X2 We also need to account for the rest of the viewing frustum as far as clipping goes (for performance)
       return;
     }
 
@@ -614,9 +612,11 @@ void createTriangle(int current_index, const unsigned int* indices, const float*
       }
     }
 
-    // Bresenham::PutLine(g_back_buffer.surface, ax, ay, bx, by);
-    // Bresenham::PutLine(g_back_buffer.surface, bx, by, cx, cy);
-    // Bresenham::PutLine(g_back_buffer.surface, cx, cy, ax, ay);
+  if(kWireframeMode){
+     Bresenham::PutLine(g_back_buffer.surface, ax, ay, bx, by);
+     Bresenham::PutLine(g_back_buffer.surface, bx, by, cx, cy);
+     Bresenham::PutLine(g_back_buffer.surface, cx, cy, ax, ay);
+  }
 }
 
 void drawModel(const Model& newModel) {
@@ -626,16 +626,10 @@ void drawModel(const Model& newModel) {
     int rotateDegrees = 0;
     float minX=1e9, maxX=-1e9, minY=1e9, maxY=-1e9;
     for(int i = 0; i < (int)newModel.getVertexCount(); i++) {
-        //float currentX = verts[i*3+0];
-        //float currentY = verts[i*3+1];
         minX = std::min(minX, verts[i*3+0]);
         maxX = std::max(maxX, verts[i*3+0]);
         minY = std::min(minY, verts[i*3+1]);
         maxY = std::max(maxY, verts[i*3+1]);
-        
-        // reset X with rotated version
-        //verts[i*3+0] = (currentX * std::cos(rotateDegrees)) - (currentY * std::sin(rotateDegrees));
-        //verts[i*3+1] = (currentX * std::sin(rotateDegrees)) + (currentY * std::cos(rotateDegrees));
     }
 
     for(int i = 0; i < (int)newModel.getTriangleCount(); i++) {
@@ -704,6 +698,8 @@ void RunMainLoop() {
     if (g_controls.qKey){
       World::cameraPos.y += 0.1;
     }
+
+    World::updateCameraBasis();
     
     SDL_ClearSurface(g_back_buffer.surface, 0, 0, 0, 1);
     g_depth_buffer.clear(std::numeric_limits<float>::max());
